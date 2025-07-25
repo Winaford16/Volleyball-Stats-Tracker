@@ -3,144 +3,152 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.File;
-import java.util.Map;
+import java.io.IOException;
 
 public class StatsTrackerFrame extends JFrame {
+
     private PlayerManager playerManager;
-    private Stopwatch stopwatch;
     private JTable statsTable;
     private DefaultTableModel tableModel;
-    private JLabel stopwatchLabel;
+    private JList<String> timestampList;
+    private DefaultListModel<String> timestampModel;
     private String selectedPlayer;
+    private Stopwatch stopwatch;
 
     public StatsTrackerFrame() {
+        super("Volleyball Stats Tracker");
         playerManager = new PlayerManager();
+        JLabel stopwatchLabel = new JLabel("Stopwatch: 00:00");
+        stopwatch = new Stopwatch(stopwatchLabel);
+
         initializeUI();
     }
 
     private void initializeUI() {
-        setTitle("Volleyball Stats Tracker");
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(1000, 600);
         setLayout(new BorderLayout());
-        getContentPane().setBackground(new Color(30, 30, 30));
 
-        DefaultListModel<String> playerListModel = new DefaultListModel<>();
-        JList<String> playerList = new JList<>(playerListModel);
+        // Left panel: player list
+        JList<String> playerList = new JList<>(playerManager.getPlayerListModel());
         playerList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        playerList.setBackground(new Color(50, 50, 50));
-        playerList.setForeground(Color.WHITE);
+        playerList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                selectedPlayer = playerList.getSelectedValue();
+                timestampModel.clear();
+                timestampModel.addAll(playerManager.getTimestamps(selectedPlayer));
+                tableModel.setDataVector(playerManager.getStatsTableData(), playerManager.getStatsTableHeaders());
+            }
+        });
+        JScrollPane playerScroll = new JScrollPane(playerList);
+        add(playerScroll, BorderLayout.WEST);
 
-        JScrollPane playerListScrollPane = new JScrollPane(playerList);
-        playerListScrollPane.setPreferredSize(new Dimension(150, getHeight()));
-        add(playerListScrollPane, BorderLayout.WEST);
-
-        DefaultListModel<String> timestampModel = new DefaultListModel<>();
-        JList<String> timestampList = new JList<>(timestampModel);
-        JScrollPane statsScrollPane = new JScrollPane(timestampList);
-        statsScrollPane.setBackground(new Color(40, 40, 40));
-        add(statsScrollPane, BorderLayout.CENTER);
-
-        JPanel statsPanel = new JPanel(new GridLayout(1, 0));
-        statsPanel.setBackground(new Color(30, 30, 30));
+        // Center panel: stat buttons
+        JPanel statPanel = new JPanel(new GridLayout(0, 2));
         for (StatType stat : StatType.values()) {
-            JButton button = createDarkStatButton(stat.toString(), e -> incrementStat(stat));
-            statsPanel.add(button);
+            JButton btn = new JButton(stat.getLabel());
+            btn.addActionListener(e -> incrementStat(stat));
+            statPanel.add(btn);
         }
-        add(statsPanel, BorderLayout.NORTH);
+        add(statPanel, BorderLayout.CENTER);
 
+        // Right panel: controls
         JPanel rightPanel = new JPanel(new GridLayout(0, 1));
-        JButton addPlayerButton = createDarkButton("Add Player", e -> addPlayer(playerListModel));
-        JButton saveButton = createDarkButton("Save Data", e -> DataSaver.saveStatsToFile(statsTable));
-        JButton setTimerButton = createDarkButton("Set Timer", e -> setStopwatchTimer());
-        JButton startStopwatchButton = createDarkButton("Start/Continue Stopwatch", e -> toggleStopwatch());
-        JButton pauseStopwatchButton = createDarkButton("Pause Stopwatch", e -> pauseStopwatch());
-        JButton resetStopwatchButton = createDarkButton("Reset Stopwatch", e -> resetStopwatch());
+        JButton addPlayerBtn = new JButton("Add Player");
+        addPlayerBtn.addActionListener(e -> addPlayer());
+        JButton setTimerButton = new JButton("Set Timer");
+        setTimerButton.addActionListener(e -> setStopwatchTimer());
 
-        stopwatchLabel = new JLabel("Stopwatch: ");
-        stopwatchLabel.setForeground(Color.WHITE);
-        stopwatchLabel.setFont(new Font("Arial", Font.PLAIN, 14));
+        JButton startStopwatchButton = new JButton("Start/Continue Stopwatch");
+        startStopwatchButton.addActionListener(e -> stopwatch.start());
 
-        rightPanel.setBackground(new Color(30, 30, 30));
-        rightPanel.add(addPlayerButton);
+        JButton pauseStopwatchButton = new JButton("Pause Stopwatch");
+        pauseStopwatchButton.addActionListener(e -> stopwatch.stop());
+
+        JButton resetStopwatchButton = new JButton("Reset Stopwatch");
+        resetStopwatchButton.addActionListener(e -> stopwatch.reset());
+
+        JButton loadVideoBtn = new JButton("Load Video");
+        loadVideoBtn.addActionListener(e -> {
+            JFileChooser fc = new JFileChooser();
+            if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+                File videoFile = fc.getSelectedFile();
+                try {
+                    VideoApiClient.loadVideo(videoFile.getAbsolutePath());
+                } catch (IOException ex) {
+                    ex.printStackTrace();
+                    JOptionPane.showMessageDialog(this, "Failed to load video.");
+                }
+            }
+        });
+
+        JButton playVideoBtn = new JButton("Play Video");
+        playVideoBtn.addActionListener(e -> {
+            try {
+                VideoApiClient.playVideo();
+            } catch (IOException ex) {
+                ex.printStackTrace();
+                JOptionPane.showMessageDialog(this, "Failed to play video.");
+            }
+        });
+
+        JButton saveDataButton = new JButton("Save Data");
+        saveDataButton.addActionListener(e -> playerManager.saveData(this));
+
+        rightPanel.add(addPlayerBtn);
         rightPanel.add(setTimerButton);
         rightPanel.add(startStopwatchButton);
         rightPanel.add(pauseStopwatchButton);
         rightPanel.add(resetStopwatchButton);
-        rightPanel.add(saveButton);
-        rightPanel.add(stopwatchLabel);
+        rightPanel.add(loadVideoBtn);
+        rightPanel.add(playVideoBtn);
+        rightPanel.add(saveDataButton);
+
         add(rightPanel, BorderLayout.EAST);
 
-        tableModel = new StatsTableModel();
+        // Bottom panel: stat table
+        tableModel = new DefaultTableModel();
         statsTable = new JTable(tableModel);
-        JScrollPane tableScrollPane = new JScrollPane(statsTable);
-        tableScrollPane.setPreferredSize(new Dimension(400, getHeight()));
-        add(tableScrollPane, BorderLayout.SOUTH);
+        add(new JScrollPane(statsTable), BorderLayout.SOUTH);
 
-        stopwatch = new Stopwatch(stopwatchLabel);
+        // Top panel: timestamps
+        timestampModel = new DefaultListModel<>();
+        timestampList = new JList<>(timestampModel);
+        add(new JScrollPane(timestampList), BorderLayout.NORTH);
+
+        setSize(1000, 600);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
         setVisible(true);
-
-        playerList.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) {
-                selectedPlayer = playerList.getSelectedValue();
-                timestampList.setModel(playerManager.getTimestampListModel(selectedPlayer));
-                tableModel.setDataVector(playerManager.getStatsTableData(), playerManager.getStatsTableHeaders());
-            }
-        });
-    }
-
-    private JButton createDarkButton(String text, ActionListener listener) {
-        JButton button = new JButton(text);
-        button.addActionListener(listener);
-        button.setBackground(new Color(255, 50, 50));
-        button.setForeground(Color.WHITE);
-        return button;
-    }
-
-    private JButton createDarkStatButton(String text, ActionListener listener) {
-        JButton button = createDarkButton(text, listener);
-        button.setPreferredSize(new Dimension(120, 30));
-        return button;
-    }
-
-    private void addPlayer(DefaultListModel<String> model) {
-        String name = JOptionPane.showInputDialog(this, "Enter player name:");
-        if (name != null && !name.trim().isEmpty()) {
-            playerManager.addPlayer(name);
-            model.addElement(name);
-        }
     }
 
     private void incrementStat(StatType stat) {
         if (selectedPlayer != null) {
-            String timestamp = Stopwatch.formatElapsedTime(stopwatch.elapsedTime());
-            playerManager.incrementStat(selectedPlayer, stat.getLabel(), timestamp);
-            tableModel.setDataVector(playerManager.getStatsTableData(), playerManager.getStatsTableHeaders());
+            try {
+                int ms = VideoApiClient.getTimestampMs();
+                String timestamp = Stopwatch.formatElapsedTime(ms);
+                playerManager.incrementStat(selectedPlayer, stat.getLabel(), timestamp);
+                tableModel.setDataVector(playerManager.getStatsTableData(), playerManager.getStatsTableHeaders());
+            } catch (IOException e) {
+                e.printStackTrace();
+                JOptionPane.showMessageDialog(this, "Failed to get video timestamp.");
+            }
+        }
+    }
+
+    private void addPlayer() {
+        String name = JOptionPane.showInputDialog(this, "Enter player name:");
+        if (name != null && !name.trim().isEmpty()) {
+            playerManager.addPlayer(name.trim());
         }
     }
 
     private void setStopwatchTimer() {
-        String minutesInput = JOptionPane.showInputDialog(this, "Enter minutes:");
-        String secondsInput = JOptionPane.showInputDialog(this, "Enter seconds:");
+        String minutes = JOptionPane.showInputDialog(this, "Enter minutes:");
+        String seconds = JOptionPane.showInputDialog(this, "Enter seconds:");
         try {
-            int minutes = Integer.parseInt(minutesInput);
-            int seconds = Integer.parseInt(secondsInput);
-            stopwatch.setTimer((minutes * 60 + seconds) * 1000);
-        } catch (NumberFormatException ex) {
-            JOptionPane.showMessageDialog(this, "Invalid time format.");
+            long duration = (Integer.parseInt(minutes) * 60 + Integer.parseInt(seconds)) * 1000L;
+            stopwatch.setTimer(duration);
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(this, "Invalid time entered.");
         }
-    }
-
-    private void toggleStopwatch() {
-        stopwatch.toggle();
-    }
-
-    private void pauseStopwatch() {
-        stopwatch.pause();
-    }
-
-    private void resetStopwatch() {
-        stopwatch.reset();
     }
 }
